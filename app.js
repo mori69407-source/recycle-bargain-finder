@@ -89,9 +89,9 @@ function labelFor(c){
 
 function cropDataUrl(bbox){
   const src=$("preview"),c=document.createElement("canvas");
-  const scaleX=src.naturalWidth/src.clientWidth||1,scaleY=src.naturalHeight/src.clientHeight||1;
-  let [x,y,w,h]=bbox.map((v,i)=>v*(i<2?(i===0?scaleX:scaleY):i===2?scaleX:scaleY));
-  const pad=Math.max(w,h)*.08;x=Math.max(0,x-pad);y=Math.max(0,y-pad);
+  let [x,y,w,h]=bbox;
+  const pad=Math.max(w,h)*.08;
+  x=Math.max(0,x-pad);y=Math.max(0,y-pad);
   w=Math.min(src.naturalWidth-x,w+pad*2);h=Math.min(src.naturalHeight-y,h+pad*2);
   c.width=Math.max(1,Math.round(w));c.height=Math.max(1,Math.round(h));
   c.getContext("2d").drawImage(src,x,y,w,h,0,0,c.width,c.height);
