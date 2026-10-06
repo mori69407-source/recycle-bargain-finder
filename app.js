@@ -42,9 +42,20 @@ $("analyze").onclick=async()=>{
   $("resultList").innerHTML='<div class="loading">AIが棚の中の商品を探しています…<br><small>初回はAIモデルの読み込みに時間がかかります。画面を閉じないでください。</small></div>';
   try{
     if(!detector){
-      detector=await pipeline("zero-shot-object-detection","onnx-community/grounding-dino-tiny-ONNX",{device:"wasm"});
+      $("resultList").innerHTML='<div class="loading">AIモデルを準備しています…<br><small>初回だけ100MB以上のモデルを読み込みます。Safariでは少し時間がかかります。</small></div>';
+      try{
+        if("gpu" in navigator){
+          detector=await pipeline("zero-shot-object-detection","onnx-community/grounding-dino-tiny-ONNX",{device:"webgpu",dtype:"q4f16"});
+        }else{
+          detector=await pipeline("zero-shot-object-detection","onnx-community/grounding-dino-tiny-ONNX",{device:"wasm",dtype:"q8"});
+        }
+      }catch(modelError){
+        console.warn("WebGPU failed, retrying WASM",modelError);
+        detector=await pipeline("zero-shot-object-detection","onnx-community/grounding-dino-tiny-ONNX",{device:"wasm",dtype:"q8"});
+      }
     }
-    const results=await detector(photo,labels,{threshold:.18,top_k:30});
+    $("resultList").innerHTML='<div class="loading">写真をAI解析しています…<br><small>棚全体から商品を探しています。</small></div>';
+    const results=await detector(photo,labels,{threshold:.15,top_k:50});
     detectedItems=dedupe(results).slice(0,10);
     if(!detectedItems.length){
       $("resultList").innerHTML='<div class="loading">商品をはっきり検出できませんでした。<br><br>棚全体ではなく、商品がもう少し大きく写るように撮影してください。</div>';
@@ -58,7 +69,7 @@ $("analyze").onclick=async()=>{
 };
 
 function dedupe(results){
-  const sorted=results.filter(x=>x.score>=.18).sort((a,b)=>b.score-a.score),out=[];
+  const sorted=results.filter(x=>x.score>=.15).sort((a,b)=>b.score-a.score),out=[];
   for(const p of sorted){
     const b=boxArray(p.box);
     if(b[2]-b[0]<40||b[3]-b[1]<40)continue;
