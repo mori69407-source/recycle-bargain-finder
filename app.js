@@ -1,139 +1,23 @@
-const $ = id => document.getElementById(id);
-
-let stream = null;
-let photo = null;
-let detectedItems = [];
-
-$("startCamera").onclick = async () => {
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false
-    });
-    $("video").srcObject = stream;
-    $("cameraHint").style.display = "none";
-    $("takePhoto").disabled = false;
-  } catch (e) {
-    alert("カメラを使えません。写真を選ぶボタンを使ってください。");
-  }
-};
-
-$("takePhoto").onclick = () => {
-  const v = $("video"), c = $("canvas");
-  c.width = v.videoWidth;
-  c.height = v.videoHeight;
-  c.getContext("2d").drawImage(v, 0, 0);
-  setPhoto(c.toDataURL("image/jpeg", 0.82));
-  if (stream) stream.getTracks().forEach(t => t.stop());
-};
-
-$("fileInput").onchange = e => {
-  const f = e.target.files[0];
-  if (!f) return;
-  const r = new FileReader();
-  r.onload = () => setPhoto(r.result);
-  r.readAsDataURL(f);
-};
-
-function setPhoto(src) {
-  photo = src;
-  $("preview").src = src;
-  $("preview").style.display = "block";
-  $("video").style.display = "none";
-  $("analyze").disabled = false;
-  $("cameraHint").style.display = "none";
-}
-
-$("analyze").onclick = async () => {
-  if (!photo) return;
-
-  show("results");
-  $("resultList").innerHTML =
-    '<div class="loading"><b>AIが棚の商品を解析しています…</b><br><br><small>今回はiPhone内にAIモデルをダウンロードしません。写真をAIサーバーへ送り、商品候補をまとめて判定します。</small></div>';
-
-  try {
-    const image = await resizeImage(photo, 1600, 0.76);
-    const response = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image })
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || "AIサーバーから応答がありませんでした。");
-
-    detectedItems = Array.isArray(data.items) ? data.items.slice(0, 10) : [];
-
-    if (!detectedItems.length) {
-      $("resultList").innerHTML =
-        '<div class="loading">商品を特定できませんでした。<br><br>商品がもう少し大きく写るように、棚に近づいて撮影してください。</div>';
-      return;
-    }
-
-    $("resultList").innerHTML = detectedItems.map(itemHtml).join("");
-  } catch (e) {
-    console.error(e);
-    $("resultList").innerHTML =
-      '<div class="loading"><b>AI解析できませんでした。</b><br><br>' +
-      escapeHtml(e.message || String(e)) +
-      '<br><br><small>通信状態を確認して、もう一度試してください。</small></div>';
-  }
-};
-
-async function resizeImage(src, maxSide, quality) {
-  const img = new Image();
-  img.src = src;
-  await new Promise((resolve, reject) => {
-    img.onload = resolve;
-    img.onerror = reject;
-  });
-
-  const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.round(img.naturalWidth * scale));
-  c.height = Math.max(1, Math.round(img.naturalHeight * scale));
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-  return c.toDataURL("image/jpeg", quality);
-}
-
-function itemHtml(item, i) {
-  const name = item.name || "商品候補";
-  const brand = item.brand && item.brand !== "不明" ? item.brand : "";
-  const model = item.model && item.model !== "不明" ? item.model : "";
-  const confidence = item.confidence ? Math.round(Number(item.confidence) * 100) : null;
-  const reason = item.reason || "";
-  const q = encodeURIComponent([name, brand, model].filter(Boolean).join(" "));
-
-  return '<article class="item">' +
-    '<div class="number">' + (i + 1) + '</div>' +
-    '<div><h3>' + escapeHtml(name) + '</h3>' +
-    (brand ? '<p><b>メーカー：</b>' + escapeHtml(brand) + '</p>' : '') +
-    (model ? '<p><b>型番・シリーズ：</b>' + escapeHtml(model) + '</p>' : '') +
-    (confidence !== null ? '<p><b>AI確度：</b>' + confidence + '%</p>' : '') +
-    (reason ? '<p class="muted">' + escapeHtml(reason) + '</p>' : '') +
-    '<a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q=' + q + '">🖼️ 画像を比較する →</a>' +
-    '<a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?q=' + q + '+中古+相場">🔎 中古相場を調べる →</a>' +
-    '</div></article>';
-}
-
-$("back").onclick = () => show("results");
-
-$("newSearch").onclick = () => {
-  photo = null;
-  detectedItems = [];
-  $("preview").style.display = "none";
-  $("video").style.display = "block";
-  $("analyze").disabled = true;
-  show("home");
-};
-
-function show(id) {
-  ["home", "results", "detail"].forEach(x => $(x).hidden = x !== id);
-  scrollTo(0, 0);
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"]/g, c => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
-  }[c]));
-}
+const $=id=>document.getElementById(id);
+const HF="https://developer0hye-qwen25-vl-7b-instruct.hf.space";
+let stream=null,photo=null,detectedItems=[];
+$("startCamera").onclick=async()=>{try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});$("video").srcObject=stream;$("cameraHint").style.display="none";$("takePhoto").disabled=false}catch(e){alert("カメラを使えません。写真を選ぶボタンを使ってください。")}};
+$("takePhoto").onclick=()=>{const v=$("video"),c=$("canvas");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);setPhoto(c.toDataURL("image/jpeg",.82));if(stream)stream.getTracks().forEach(t=>t.stop())};
+$("fileInput").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>setPhoto(r.result);r.readAsDataURL(f)};
+function setPhoto(src){photo=src;$("preview").src=src;$("preview").style.display="block";$("video").style.display="none";$("analyze").disabled=false;$("cameraHint").style.display="none"}
+$("analyze").onclick=async()=>{if(!photo)return;show("results");$("resultList").innerHTML='<div class="loading"><b>AIが棚の商品を解析しています…</b><br><br><small>写真1枚から、別々の商品を最大10個探しています。</small></div>';try{const text=await askVision(await resizeImage(photo,1400,.72));detectedItems=parseItems(text).slice(0,10);$("resultList").innerHTML=detectedItems.length?detectedItems.map(itemHtml).join(""):'<div class="loading">商品を特定できませんでした。<br><br>商品がもう少し大きく写るように撮影してください。</div>'}catch(e){console.error(e);$("resultList").innerHTML='<div class="loading"><b>AI解析できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'<br><br><small>少し待ってから、もう一度試してください。</small></div>'}};
+async function askVision(dataUrl){const form=new FormData();form.append("files",dataUrlToBlob(dataUrl),"shelf.jpg");const up=await fetch(HF+"/gradio_api/upload",{method:"POST",body:form});if(!up.ok)throw Error("AIサーバーへの写真送信に失敗しました。");const u=await up.json(),path=Array.isArray(u)?u[0]:u?.path;if(!path)throw Error("AIサーバーが写真を受け付けませんでした。");const prompt=`この棚写真から、別々の商品を最大10個まで探してください。リサイクルショップの商品調査が目的です。ぬいぐるみ、食器、陶器、花瓶、置物、おもちゃ、雑貨、家電など、売り物になりそうな物を優先してください。
+重要: 同じ商品を重複して数えない。棚、値札、背景だけは商品にしない。写真から確認できる特徴を優先する。メーカー、ブランド、シリーズ、型番が読めるなら書く。分からないものを断定しない。一般名しか分からなくても候補にする。日本の中古市場で検索しやすい日本語名にする。各商品の位置を写真全体1000×1000の相対座標 x,y,w,h で示す。左上が0,0。JSONだけを返しMarkdownは不要。
+形式: {"items":[{"name":"商品名","brand":"ブランドまたは不明","model":"型番・シリーズまたは不明","confidence":0.0,"reason":"短い理由","box":{"x":0,"y":0,"w":0,"h":0}}]}`;
+const call=await fetch(HF+"/gradio_api/call/qwen_vl_inference",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:[{path,meta:{_type:"gradio.FileData"},orig_name:"shelf.jpg"},prompt]})});if(!call.ok)throw Error("AI解析の受付に失敗しました。");const cj=await call.json();if(!cj.event_id)throw Error("AI解析の受付番号を取得できませんでした。");const poll=await fetch(HF+"/gradio_api/call/qwen_vl_inference/"+encodeURIComponent(cj.event_id));if(!poll.ok)throw Error("AI解析結果を取得できませんでした。");const sse=await poll.text(),m=sse.match(/event:\s*complete\s*\ndata:\s*(.+)/s);if(!m){const er=sse.match(/event:\s*error\s*\ndata:\s*(.+)/s);throw Error(er?er[1]:"AI解析が完了しませんでした。")}let d;try{d=JSON.parse(m[1])}catch{throw Error("AIの返答を読み取れませんでした。")}return Array.isArray(d)?String(d[0]||""):String(d||"")}
+function parseItems(text){const m=text.replace(/\`\`\`json|\`\`\`/g,"").match(/\{[\s\S]*\}/);if(!m)return[];let p;try{p=JSON.parse(m[0])}catch{return[]}if(!Array.isArray(p.items))return[];return p.items.map(x=>{const b=x.box||{};return{name:String(x.name||"商品候補"),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:clamp(Number(x.confidence)||0,0,1),reason:String(x.reason||""),box:{x:clamp(Number(b.x)||0,0,1000),y:clamp(Number(b.y)||0,0,1000),w:clamp(Number(b.w)||0,0,1000),h:clamp(Number(b.h)||0,0,1000)}}}).filter(x=>x.name!=="商品候補")}
+function itemHtml(item,i){const crop=makeCrop(photo,item.box);item.crop=crop;return '<article class="item clickable" onclick="openDetail('+i+')"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="商品候補">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p>'+(item.reason?'<p class="muted">'+escapeHtml(item.reason)+'</p>':'')+'<span class="source">詳細・比較を見る →</span></div></article>'}
+window.openDetail=i=>{const item=detectedItems[i];if(!item)return;const name=[item.name,item.brand,item.model].filter(x=>x&&x!=="不明").join(" "),q=encodeURIComponent(name),crop=item.crop||makeCrop(photo,item.box);$("detailBody").innerHTML='<div class="detailCard">'+(crop?'<img src="'+crop+'" alt="解析対象の商品">':'')+'<h2>'+escapeHtml(item.name)+'</h2>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p>'+(item.reason?'<p class="muted">'+escapeHtml(item.reason)+'</p>':'')+'<h3>画像で見比べる</h3><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+q+'">Google画像検索 →</a><a class="source" target="_blank" rel="noopener" href="https://www.bing.com/images/search?q='+q+'">Bing画像検索 →</a><a class="source" target="_blank" rel="noopener" href="https://search.yahoo.co.jp/image/search?p='+q+'">Yahoo!画像検索 →</a><h3>中古相場を調べる</h3><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?q='+q+'%20中古%20相場">Googleで中古相場 →</a><a class="source" target="_blank" rel="noopener" href="https://www.mercari.com/jp/search/?keyword='+q+'">メルカリで探す →</a></div>';show("detail")};
+$("back").onclick=()=>show("results");
+$("newSearch").onclick=()=>{photo=null;detectedItems=[];$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;show("home")};
+function makeCrop(src,b){if(!src||!b||b.w<10||b.h<10)return"";const img=new Image();img.src=src;const c=document.createElement("canvas"),scale=Math.min(1,500/Math.max(b.w,b.h));c.width=Math.max(80,Math.round(b.w*scale));c.height=Math.max(80,Math.round(b.h*scale));const ctx=c.getContext("2d"),sx=Math.round(b.x/1000*img.naturalWidth),sy=Math.round(b.y/1000*img.naturalHeight),sw=Math.round(b.w/1000*img.naturalWidth),sh=Math.round(b.h/1000*img.naturalHeight);try{ctx.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/jpeg",.82)}catch{return""}}
+function dataUrlToBlob(s){const[a,b]=s.split(","),mime=(a.match(/data:([^;]+)/)||[,"image/jpeg"])[1],bytes=atob(b),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return new Blob([arr],{type:mime})}
+async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q)}
+function show(id){["home","results","detail"].forEach(x=>$(x).hidden=x!==id);scrollTo(0,0)}
+function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]))}
