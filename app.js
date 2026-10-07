@@ -1,40 +1,29 @@
 const $=id=>document.getElementById(id);
-const HF="https://developer0hye-qwen25-vl-7b-instruct.hf.space";
 let stream=null,photo=null,detectedItems=[];
 $("startCamera").onclick=async()=>{try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});$("video").srcObject=stream;$("cameraHint").style.display="none";$("takePhoto").disabled=false}catch(e){alert("カメラを使えません。写真を選ぶボタンを使ってください。")}};
-$("takePhoto").onclick=()=>{const v=$("video"),c=$("canvas");c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);setPhoto(c.toDataURL("image/jpeg",.82));if(stream)stream.getTracks().forEach(t=>t.stop())};
+$("takePhoto").onclick=()=>{const v=$("video"),c=$("canvas");if(!v.videoWidth)return; c.width=v.videoWidth;c.height=v.videoHeight;c.getContext("2d").drawImage(v,0,0);setPhoto(c.toDataURL("image/jpeg",.8));if(stream)stream.getTracks().forEach(t=>t.stop())};
 $("fileInput").onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>setPhoto(r.result);r.readAsDataURL(f)};
 function setPhoto(src){photo=src;$("preview").src=src;$("preview").style.display="block";$("video").style.display="none";$("analyze").disabled=false;$("cameraHint").style.display="none"}
-$("analyze").onclick=async()=>{if(!photo)return;show("results");$("resultList").innerHTML='<div class="loading"><b>AIが棚の商品を解析しています…</b><br><br><small>写真1枚から、別々の商品を最大10個探しています。</small></div>';try{const text=await askVision(await resizeImage(photo,1400,.72));detectedItems=parseItems(text).slice(0,10);$("resultList").innerHTML=detectedItems.length?detectedItems.map(itemHtml).join(""):'<div class="loading">商品を特定できませんでした。<br><br>商品がもう少し大きく写るように撮影してください。</div>'}catch(e){console.error(e);$("resultList").innerHTML='<div class="loading"><b>AI解析できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'<br><br><small>少し待ってから、もう一度試してください。</small></div>'}};
+$("analyze").onclick=async()=>{if(!photo)return;show("results");$("resultList").innerHTML='<div class="loading"><b>AI解析中です…</b><br><br>商品1個だけを認識するテストです。初回はAIの起動に時間がかかることがあります。</div>';try{const text=await askVision(await resizeImage(photo,1100,.72));const item=parseOne(text);if(!item)throw Error("AIは商品を特定できませんでした。商品を大きく写した写真で試してください。");detectedItems=[item];$("resultList").innerHTML=itemHtml(item)}catch(e){console.error(e);$("resultList").innerHTML='<div class="loading"><b>AI解析できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'</div>'}};
 async function askVision(dataUrl){
-  const { Client, handle_file } = await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
-  const blob=dataUrlToBlob(dataUrl);
-  const prompt=`この棚写真から、見えている別々の商品を最大10個まで認識してください。リサイクルショップの商品調査が目的です。ぬいぐるみ、食器、陶器、花瓶、置物、おもちゃ、雑貨、家電など、売り物になりそうな物を優先してください。
-重要: 同じ商品を重複して数えない。棚、値札、背景だけは商品にしない。写真から確認できる特徴を優先する。メーカー、ブランド、シリーズ、型番が読めるなら書く。分からないものを断定しない。一般名しか分からなくても候補にする。日本の中古市場で検索しやすい日本語名にする。各商品の位置を写真全体1000×1000の相対座標 x,y,w,h で示す。位置が分からない場合でも商品名だけは必ず返す。左上が0,0。JSONだけを返しMarkdownは不要。
-形式: {"items":[{"name":"商品名","brand":"ブランドまたは不明","model":"型番・シリーズまたは不明","confidence":0.0,"reason":"短い理由","box":{"x":0,"y":0,"w":0,"h":0}}]}\`;
-  let app;
-  try{
-    app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");
-  }catch(e){
-    throw Error("AIサービスへの接続に失敗しました。少し待ってから再試行してください。");
-  }
-  let result;
-  try{
-    result=await app.predict("/qwen_vl_inference",[handle_file(blob),prompt]);
-  }catch(e){
-    console.error(e);
-    throw Error("AIへの画像解析依頼に失敗しました。AIサービスが混雑している可能性があります。");
-  }
-  const data=result&&result.data;
-  if(!data)throw Error("AIから解析結果が返りませんでした。");
-  return Array.isArray(data)?String(data[0]||""):String(data||"");
+ const {Client,handle_file}=await import("https://cdn.jsdelivr.net/npm/@gradio/client@1.15.0/dist/index.min.js");
+ let status="";
+ const app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct",{status_callback:s=>{status=s&&s.status||""}});
+ const api=await app.view_api();
+ const endpoint=api.named_endpoints&&api.named_endpoints["/qwen_vl_inference"];
+ if(!endpoint)throw Error("AI側の解析入口が見つかりませんでした。");
+ const blob=dataUrlToBlob(dataUrl);
+ const prompt='この画像に写っている「商品」を1個だけ認識してください。背景や棚は無視してください。日本語で、商品名、メーカー/ブランド（分かれば）、型番/シリーズ（分かれば）、そう判断した理由を短く返してください。分からない情報は「不明」としてください。JSONだけを返してください。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
+ let result;
+ try{result=await app.predict("/qwen_vl_inference",[handle_file(blob),prompt])}catch(e){throw Error("AI解析に失敗しました。AIが起動中または混雑中の可能性があります。もう一度お試しください。")}
+ const data=result&&result.data;
+ if(!data)throw Error("AIから結果が返りませんでした。");
+ return Array.isArray(data)?String(data[0]||""):String(data);
 }
-function parseItems(text){const m=text.replace(/\`\`\`json|\`\`\`/g,"").match(/\{[\s\S]*\}/);if(!m)return[];let p;try{p=JSON.parse(m[0])}catch{return[]}if(!Array.isArray(p.items))return[];return p.items.map(x=>{const b=x.box||{};return{name:String(x.name||"商品候補"),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:clamp(Number(x.confidence)||0,0,1),reason:String(x.reason||""),box:{x:clamp(Number(b.x)||0,0,1000),y:clamp(Number(b.y)||0,0,1000),w:clamp(Number(b.w)||0,0,1000),h:clamp(Number(b.h)||0,0,1000)}}}).filter(x=>x.name!=="商品候補")}
-function itemHtml(item,i){const crop=makeCrop(photo,item.box);item.crop=crop;return '<article class="item clickable" onclick="openDetail('+i+')"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="商品候補">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p>'+(item.reason?'<p class="muted">'+escapeHtml(item.reason)+'</p>':'')+'<span class="source">詳細・比較を見る →</span></div></article>'}
-window.openDetail=i=>{const item=detectedItems[i];if(!item)return;const name=[item.name,item.brand,item.model].filter(x=>x&&x!=="不明").join(" "),q=encodeURIComponent(name),crop=item.crop||makeCrop(photo,item.box);$("detailBody").innerHTML='<div class="detailCard">'+(crop?'<img src="'+crop+'" alt="解析対象の商品">':'')+'<h2>'+escapeHtml(item.name)+'</h2>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p>'+(item.reason?'<p class="muted">'+escapeHtml(item.reason)+'</p>':'')+'<h3>画像で見比べる</h3><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+q+'">Google画像検索 →</a><a class="source" target="_blank" rel="noopener" href="https://www.bing.com/images/search?q='+q+'">Bing画像検索 →</a><a class="source" target="_blank" rel="noopener" href="https://search.yahoo.co.jp/image/search?p='+q+'">Yahoo!画像検索 →</a><h3>中古相場を調べる</h3><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?q='+q+'%20中古%20相場">Googleで中古相場 →</a><a class="source" target="_blank" rel="noopener" href="https://www.mercari.com/jp/search/?keyword='+q+'">メルカリで探す →</a></div>';show("detail")};
-$("back").onclick=()=>show("results");
+function parseOne(text){const clean=String(text).replace(/\`\`\`json|\`\`\`/g,"");const m=clean.match(/\{[\s\S]*\}/);if(!m)return null;try{const x=JSON.parse(m[0]);if(!x.name)return null;return{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:clamp(Number(x.confidence)||0,0,1),reason:String(x.reason||"")}}catch{return null}}
+function itemHtml(x){return '<article class="item"><div class="number">1</div><div><h3>'+escapeHtml(x.name)+'</h3>'+(x.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(x.brand)+'</p>':'')+(x.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(x.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(x.confidence*100)+'%</p>'+(x.reason?'<p class="muted">'+escapeHtml(x.reason)+'</p>':'')+'</div></article>'}
 $("newSearch").onclick=()=>{photo=null;detectedItems=[];$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;show("home")};
-function makeCrop(src,b){if(!src||!b||b.w<10||b.h<10)return"";const img=$("preview");if(!img||!img.naturalWidth||!img.naturalHeight)return"";const c=document.createElement("canvas"),scale=Math.min(1,500/Math.max(b.w,b.h));c.width=Math.max(80,Math.round(b.w*scale));c.height=Math.max(80,Math.round(b.h*scale));const ctx=c.getContext("2d"),sx=Math.round(b.x/1000*img.naturalWidth),sy=Math.round(b.y/1000*img.naturalHeight),sw=Math.round(b.w/1000*img.naturalWidth),sh=Math.round(b.h/1000*img.naturalHeight);try{ctx.drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/jpeg",.82)}catch{return""}}
+$("back").onclick=()=>show("home");
 function dataUrlToBlob(s){const[a,b]=s.split(","),mime=(a.match(/data:([^;]+)/)||[,"image/jpeg"])[1],bytes=atob(b),arr=new Uint8Array(bytes.length);for(let i=0;i<bytes.length;i++)arr[i]=bytes.charCodeAt(i);return new Blob([arr],{type:mime})}
 async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q)}
 function show(id){["home","results","detail"].forEach(x=>$(x).hidden=x!==id);scrollTo(0,0)}
