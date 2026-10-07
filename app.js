@@ -9,7 +9,7 @@ $("analyze").onclick=async()=>{if(!photo)return;show("results");$("resultList").
 async function askVision(dataUrl){
   const { Client, handle_file } = await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
   const blob=dataUrlToBlob(dataUrl);
-  const prompt=\`この棚写真から、見えている別々の商品を最大10個まで認識してください。リサイクルショップの商品調査が目的です。ぬいぐるみ、食器、陶器、花瓶、置物、おもちゃ、雑貨、家電など、売り物になりそうな物を優先してください。
+  const prompt=`この棚写真から、見えている別々の商品を最大10個まで認識してください。リサイクルショップの商品調査が目的です。ぬいぐるみ、食器、陶器、花瓶、置物、おもちゃ、雑貨、家電など、売り物になりそうな物を優先してください。
 重要: 同じ商品を重複して数えない。棚、値札、背景だけは商品にしない。写真から確認できる特徴を優先する。メーカー、ブランド、シリーズ、型番が読めるなら書く。分からないものを断定しない。一般名しか分からなくても候補にする。日本の中古市場で検索しやすい日本語名にする。各商品の位置を写真全体1000×1000の相対座標 x,y,w,h で示す。位置が分からない場合でも商品名だけは必ず返す。左上が0,0。JSONだけを返しMarkdownは不要。
 形式: {"items":[{"name":"商品名","brand":"ブランドまたは不明","model":"型番・シリーズまたは不明","confidence":0.0,"reason":"短い理由","box":{"x":0,"y":0,"w":0,"h":0}}]}\`;
   let app;
