@@ -61,13 +61,25 @@ $("analyze").addEventListener("click",async()=>{
 async function askVision(dataUrl){
   const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client@1.15.0/dist/index.min.js");
   const Client=mod.Client,handle_file=mod.handle_file;
-  const app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");
-  const prompt='画像に写っている商品を1個だけ認識してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度を日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
-  const result=await app.predict("/qwen_vl_inference",[handle_file(dataUrlToBlob(dataUrl)),prompt]);
-  if(!result||!result.data)throw new Error("AIから結果が返りませんでした。");
-  return Array.isArray(result.data)?String(result.data[0]||""):String(result.data);
+  const app=await Client.connect("https://developer0hye-qwen25-vl-7b-instruct.hf.space",{events:["data","status"]});
+  const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度を日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
+  const job=app.submit("/qwen_vl_inference",[handle_file(dataUrlToBlob(dataUrl)),prompt]);
+  let lastStatus="";
+  for await(const msg of job){
+    if(msg.type==="status"){
+      lastStatus=msg.stage||"";
+      if(msg.stage==="error"){
+        throw new Error(msg.message||"AI側で解析エラーが発生しました。");
+      }
+    }
+    if(msg.type==="data"){
+      const data=msg.data;
+      if(!data)throw new Error("AIから結果が返りませんでした。");
+      return Array.isArray(data)?String(data[0]||""):String(data);
+    }
+  }
+  throw new Error(lastStatus==="pending"||lastStatus==="generating"?"AIの処理が終了しませんでした。もう一度お試しください。":"AIから解析結果が返りませんでした。");
 }
-
 function parseOne(text){
   const m=String(text).match(/\{[\s\S]*\}/);
   if(!m)return null;
