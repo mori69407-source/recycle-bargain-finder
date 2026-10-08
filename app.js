@@ -40,18 +40,21 @@ async function askVision(dataUrl){
   const Client=mod.Client,handle_file=mod.handle_file;
   let app;
   try{
-    app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");
-  }catch(e){throw new Error("AIサービスに接続できません。Hugging Face側が起動するまで少し時間がかかる場合があります。: "+(e.message||e));}
+    app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct",{
+      status_callback:(status)=>console.log("AI SPACE STATUS",status)
+    });
+  }catch(e){throw new Error("AIサービスへ接続できません: "+(e.message||e));}
+  let api;
+  try{api=await app.view_api();}catch(e){throw new Error("AIのAPI情報を取得できません: "+(e.message||e));}
+  const endpoint=api&&api.named_endpoints&&api.named_endpoints["/qwen_vl_inference"];
+  if(!endpoint)throw new Error("AIサービスに /qwen_vl_inference がありません。現在のAPI: "+JSON.stringify(api&&api.named_endpoints||{}));
   const file=handle_file(dataUrlToBlob(dataUrl));
   const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。位置は画像全体を1000x1000とした相対座標です。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}';
   try{
-    const result=await Promise.race([
-      app.predict("/qwen_vl_inference",[file,prompt]),
-      new Promise((_,reject)=>setTimeout(()=>reject(new Error("AI解析が90秒以内に返りませんでした。AIサービスが起動中の可能性があります。")),90000))
-    ]);
+    const result=await app.predict("/qwen_vl_inference",[file,prompt]);
     if(!result||!result.data)throw new Error("AIから空の結果が返りました。");
     return Array.isArray(result.data)?String(result.data[0]||""):String(result.data);
-  }catch(e){console.error("AI ERROR",e);throw new Error(e.message||String(e));}
+  }catch(e){console.error("AI ERROR",e);throw new Error("AI解析処理で失敗しました: "+(e.message||e));}
 }
 function parseOne(text){
   const raw=String(text).replace(/\`\`\`json/gi,"").replace(/\`\`\`/g,"").trim();
