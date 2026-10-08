@@ -74,7 +74,7 @@ async function askVision(dataUrl){
   ];
   const all=[];
   for(const t of tiles){
-    const tile=makeTile(src,t);
+    const tile=await makeTile(dataUrl,t);
     const file=handle_file(dataUrlToBlob(tile));
     const prompt='この写真の中から、棚や背景ではなく「商品」だけを最大3個見つけてください。商品名は分かる範囲で簡潔にしてください。分からない商品も位置が分かれば「不明な商品」としてください。JSONや説明文は不要で、必ず次の形式の行だけを返してください。ITEM|商品名|メーカー|型番|確度(0-100)|x|y|w|h。x,y,w,hはこの写真全体を1000とした座標です。商品の本体をできるだけぴったり囲んでください。値札は商品に含めません。商品がなければNONEだけ返してください。';
     try{
@@ -101,8 +101,10 @@ async function imageInfo(dataUrl){
   await new Promise((r,j)=>{img.onload=r;img.onerror=j});
   return {w:img.naturalWidth,h:img.naturalHeight};
 }
-function makeTile(src,t){
-  const img=new Image();img.src=src;
+async function makeTile(src,t){
+  const img=new Image();
+  img.src=src;
+  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;});
   const c=document.createElement("canvas");
   const sw=Math.round(img.naturalWidth*t.w),sh=Math.round(img.naturalHeight*t.h);
   c.width=Math.min(900,sw);c.height=Math.min(900,sh);
