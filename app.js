@@ -82,15 +82,33 @@ async function askVision(dataUrl){
   }catch(e){console.error("AI ERROR",e);throw new Error(e.message||String(e));}
 }
 function parseMany(text){
-  const raw=String(text).replace(/\\`\\`\\`json|\\`\\`\\`/g,"").trim();
-  const m=raw.match(/\\[[\\s\\S]*\\]/);
+  let raw=String(text).trim().replace(/^\`\`\`(?:json)?/i,"").replace(/\`\`\`$/,"").trim();
   let arr=[];
-  try{arr=JSON.parse(m?m[0]:raw);}catch(e){
-    const objs=raw.match(/\\{[^{}]*\\}/g)||[];
-    for(const o of objs){try{arr.push(JSON.parse(o));}catch(_){} }
+  const first=raw.indexOf("[");
+  const last=raw.lastIndexOf("]");
+  if(first>=0&&last>first){
+    try{arr=JSON.parse(raw.slice(first,last+1));}catch(e){}
+  }
+  if(!arr.length){
+    const firstObj=raw.indexOf("{"),lastObj=raw.lastIndexOf("}");
+    if(firstObj>=0&&lastObj>firstObj){
+      try{arr=[JSON.parse(raw.slice(firstObj,lastObj+1))];}catch(e){}
+    }
   }
   if(!Array.isArray(arr))arr=[arr];
-  return arr.map(x=>x&&x.name?{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||""),box:{x:Number(x.box?.x)||0,y:Number(x.box?.y)||0,w:Number(x.box?.w)||0,h:Number(x.box?.h)||0}}:null).filter(Boolean).slice(0,10);
+  return arr.map(x=>x&&x.name?{
+    name:String(x.name),
+    brand:String(x.brand||"不明"),
+    model:String(x.model||"不明"),
+    confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),
+    reason:String(x.reason||""),
+    box:{
+      x:Number(x.box?.x)||0,
+      y:Number(x.box?.y)||0,
+      w:Number(x.box?.w)||0,
+      h:Number(x.box?.h)||0
+    }
+  }:null).filter(Boolean).slice(0,10);
 }
 function dataUrlToBlob(s){const p=s.split(","),mime=(p[0].match(/data:([^;]+)/)||[])[1]||"image/jpeg",b=atob(p[1]),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:mime});}
 async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q);}
