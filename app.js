@@ -36,23 +36,21 @@ $("analyze").addEventListener("click",async()=>{
 });
 
 async function askVision(dataUrl){
-  const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
+  const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client@1.19.1/dist/index.min.js");
   const Client=mod.Client,handle_file=mod.handle_file;
   let app;
-  try{app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");}
-  catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
   try{
-    const file=handle_file(dataUrlToBlob(dataUrl));
-    const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。商品の位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}で返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}';
-    const job=app.submit("/qwen_vl_inference",[file,prompt]);
-    for await(const msg of job){
-      if(msg.type==="status"&&msg.stage==="error")throw new Error(msg.message||"AI側でエラーが発生しました。");
-      if(msg.type==="data"){
-        if(!msg.data)throw new Error("AIから空の結果が返りました。");
-        return Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data);
-      }
-    }
-    throw new Error("AIから解析結果が返りませんでした。");
+    app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct",{events:["status","data"]});
+  }catch(e){throw new Error("AIサービスへの接続に失敗しました: "+(e.message||e));}
+  const file=handle_file(dataUrlToBlob(dataUrl));
+  const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。商品の位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}で返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}';
+  try{
+    const api=await app.view_api();
+    const endpoint=api&&api.named_endpoints&&api.named_endpoints["/qwen_vl_inference"];
+    if(!endpoint)throw new Error("AIサービスの解析APIが現在公開されていません。");
+    const result=await app.predict("/qwen_vl_inference",[file,prompt]);
+    if(!result||!result.data)throw new Error("AIから空の結果が返りました。");
+    return Array.isArray(result.data)?String(result.data[0]||""):String(result.data);
   }catch(e){console.error("AI ERROR",e);throw new Error(e.message||String(e));}
 }
 function parseOne(text){
