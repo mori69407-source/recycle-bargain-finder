@@ -65,33 +65,23 @@ async function askVision(dataUrl){
   const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
   const Client=mod.Client,handle_file=mod.handle_file;
   let app;
-  try{app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");}
-  catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
-  const results=[];
-  const prompts=[
-    '画像に写っている商品を1個だけ認識してください。最もはっきり写っている商品を選んでください。背景、棚、値札は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。位置は画像全体を1000x1000とした相対座標でbox:{x,y,w,h}。boxは商品の本体だけを囲んでください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":250,"h":350}}',
-    '画像に写っている商品を1個だけ認識してください。別の商品を選んでください。背景、棚、値札は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、位置boxを日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":250,"h":350}}',
-    '画像に写っている、まだ選ばれていない別の商品を1個だけ認識してください。背景、棚、値札は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、位置boxを日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":250,"h":350}}'
-  ];
-  for(let i=0;i<3;i++){
-    let prompt=prompts[i];
-    if(results.length) prompt+=' 既に見つかった商品: '+results.map(x=>x.name).join("、")+'。位置: '+results.map(x=>JSON.stringify(x.box)).join("、")+'。これらと重ならない別の商品を選んでください。';
-    try{
-      const file=handle_file(dataUrlToBlob(dataUrl));
-      const job=app.submit("/qwen_vl_inference",[file,prompt]);
-      let raw="";
-      for await(const msg of job){
-        if(msg.type==="status" && msg.stage==="error") throw new Error(msg.message||"AI側でエラーが発生しました。");
-        if(msg.type==="data"){ raw=Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data); break; }
-      }
+  try{app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");}catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
+  const file=handle_file(dataUrlToBlob(dataUrl));
+  const prompt='この写真の中で最も目立つ商品を1個だけ認識してください。棚、背景、値札、人は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、位置boxを日本語でJSONだけ返してください。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}。boxは写真全体を1000x1000とした商品の位置です。分からない情報は不明。';
+  const job=app.submit("/qwen_vl_inference",[file,prompt]);
+  for await(const msg of job){
+    if(msg.type==="status"&&msg.stage==="error")throw new Error(msg.message||"AI側でエラーが発生しました。");
+    if(msg.type==="data"){
+      const raw=Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data||"");
       const item=parseOne(raw);
-      if(item) results.push(item);
-    }catch(e){ if(i===0) throw e; }
+      if(item)return JSON.stringify([item]);
+      throw new Error("AIの返答を商品情報として読み取れませんでした。");
+    }
   }
-  return JSON.stringify(results);
+  throw new Error("AIから解析結果が返りませんでした。");
 }
 function parseOne(text){
-  const m=String(text).match(/\{[\s\S]*\}/);
+  const raw=String(text),m=raw.match(/\{[\s\S]*\}/);
   if(!m)return null;
   try{
     const x=JSON.parse(m[0]);
@@ -99,9 +89,7 @@ function parseOne(text){
     return {name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||""),box:{x:Number(x.box?.x)||0,y:Number(x.box?.y)||0,w:Number(x.box?.w)||0,h:Number(x.box?.h)||0}};
   }catch(e){return null;}
 }
-function parseMany(text){
-  try{const a=JSON.parse(String(text));return Array.isArray(a)?a.slice(0,3):[];}catch(e){return [];}
-}
+function parseMany(text){try{const a=JSON.parse(String(text));return Array.isArray(a)?a.slice(0,3):[];}catch(e){return [];}}
 function dataUrlToBlob(s){const p=s.split(","),mime=(p[0].match(/data:([^;]+)/)||[])[1]||"image/jpeg",b=atob(p[1]),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:mime});}
 async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q);}
 $("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;show("home");});
