@@ -46,14 +46,14 @@ function setPhoto(src){
 $("analyze").addEventListener("click",async()=>{
   if(!photo)return;
   show("results");
-  $("resultList").innerHTML='<div class="loading"><b>AI解析中です…</b><br><br>写真から商品を最大10個探しています。</div>';
+  $("resultList").innerHTML='<div class="loading"><b>AI解析中です…</b><br><br>写真の中から商品を最大3個探しています。</div>';
   try{
     const text=await askVision(await resizeImage(photo,1100,0.72));
     const items=parseMany(text);
     if(!items.length)throw new Error("商品を特定できませんでした。");
     $("resultList").innerHTML=items.map((item,i)=>{
       const crop=makeCrop(photo,item.box);
-      return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="認識した商品">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p><p class="muted">'+escapeHtml(item.reason)+'</p></div></article>';
+      return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="AIが認識した商品">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p><p class="muted">'+escapeHtml(item.reason)+'</p></div></article>';
     }).join('');
   }catch(e){
     console.error(e);
@@ -67,92 +67,33 @@ async function askVision(dataUrl){
   let app;
   try{app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");}
   catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
-  const src=await imageInfo(dataUrl);
-  const tiles=[
-    {x:0,y:0,w:0.55,h:0.55},{x:0.45,y:0,w:0.55,h:0.55},
-    {x:0,y:0.45,w:0.55,h:0.55},{x:0.45,y:0.45,w:0.55,h:0.55}
-  ];
-  const all=[];
-  for(const t of tiles){
-    const tile=await makeTile(dataUrl,t);
-    const file=handle_file(dataUrlToBlob(tile));
-    const prompt='この写真の中から、棚や背景ではなく「商品」だけを最大3個見つけてください。商品名は分かる範囲で簡潔にしてください。分からない商品も位置が分かれば「不明な商品」としてください。JSONや説明文は不要で、必ず次の形式の行だけを返してください。ITEM|商品名|メーカー|型番|確度(0-100)|x|y|w|h。x,y,w,hはこの写真全体を1000とした座標です。商品の本体をできるだけぴったり囲んでください。値札は商品に含めません。商品がなければNONEだけ返してください。';
-    try{
-      const job=app.submit("/qwen_vl_inference",[file,prompt]);
-      for await(const msg of job){
-        if(msg.type==="status"&&msg.stage==="error")throw new Error(msg.message||"AIエラー");
-        if(msg.type==="data"){
-          const out=Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data||"");
-          all.push(...parseLines(out,t));
-          break;
-        }
+  try{
+    const file=handle_file(dataUrlToBlob(dataUrl));
+    const prompt='画像に写っている「別々の商品」を最大3個まで認識してください。背景、棚、値札は商品として数えません。同じ商品は1個として数えません。各商品について商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語で返してください。位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}です。boxは商品の本体だけをできるだけ正確に囲んでください。必ずboxを返してください。分からない情報は不明。JSON配列のみ返してください。形式: [{"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":250,"h":350}}]';
+    const job=app.submit("/qwen_vl_inference",[file,prompt]);
+    for await(const msg of job){
+      if(msg.type==="status" && msg.stage==="error") throw new Error(msg.message||"AI側でエラーが発生しました。");
+      if(msg.type==="data"){
+        if(!msg.data) throw new Error("AIから空の結果が返りました。");
+        return Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data);
       }
-    }catch(e){console.warn("tile AI error",e);}
+    }
+    throw new Error("AIから解析結果が返りませんでした。");
+  }catch(e){
+    console.error("AI ERROR",e);
+    throw new Error(e.message||String(e));
   }
-  const unique=[];
-  for(const item of all){
-    const dup=unique.some(v=>Math.abs(v.box.x-item.box.x)<70&&Math.abs(v.box.y-item.box.y)<70);
-    if(!dup)unique.push(item);
-  }
-  return JSON.stringify(unique.slice(0,10));
-}
-async function imageInfo(dataUrl){
-  const img=new Image();img.src=dataUrl;
-  await new Promise((r,j)=>{img.onload=r;img.onerror=j});
-  return {w:img.naturalWidth,h:img.naturalHeight};
-}
-async function makeTile(src,t){
-  const img=new Image();
-  img.src=src;
-  await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;});
-  const c=document.createElement("canvas");
-  const sw=Math.round(img.naturalWidth*t.w),sh=Math.round(img.naturalHeight*t.h);
-  c.width=Math.min(900,sw);c.height=Math.min(900,sh);
-  c.getContext("2d").drawImage(img,Math.round(img.naturalWidth*t.x),Math.round(img.naturalHeight*t.y),sw,sh,0,0,c.width,c.height);
-  return c.toDataURL("image/jpeg",0.8);
-}
-function parseLines(text,t){
-  const out=[];
-  for(const line of String(text).split(/\\r?\\n/)){
-    const p=line.trim().split("|");
-    if(p[0]!=="ITEM"||p.length<9)continue;
-    const name=p[1]&&p[1].trim();
-    const x=Number(p[5]),y=Number(p[6]),w=Number(p[7]),h=Number(p[8]);
-    if(!name||![x,y,w,h].every(Number.isFinite)||w<5||h<5)continue;
-    out.push({name,brand:p[2]?.trim()||"不明",model:p[3]?.trim()||"不明",confidence:Math.max(0,Math.min(1,(Number(p[4])||0)/100)),reason:"棚写真からAIが検出",box:{
-      x:(t.x+x/1000*t.w)*1000,y:(t.y+y/1000*t.h)*1000,w:w*t.w,h:h*t.h
-    }});
-  }
-  return out;
 }
 function parseMany(text){
-  let raw=String(text).trim().replace(/^\`\`\`(?:json)?/i,"").replace(/\`\`\`$/,"").trim();
+  const raw=String(text);
+  const m=raw.match(/\[[\s\S]*\]/);
   let arr=[];
-  const first=raw.indexOf("[");
-  const last=raw.lastIndexOf("]");
-  if(first>=0&&last>first){
-    try{arr=JSON.parse(raw.slice(first,last+1));}catch(e){}
-  }
-  if(!arr.length){
-    const firstObj=raw.indexOf("{"),lastObj=raw.lastIndexOf("}");
-    if(firstObj>=0&&lastObj>firstObj){
-      try{arr=[JSON.parse(raw.slice(firstObj,lastObj+1))];}catch(e){}
-    }
+  try{arr=JSON.parse(m?m[0]:raw)}catch(e){
+    const one=raw.match(/\{[\s\S]*\}/);
+    if(one){try{arr=[JSON.parse(one[0])]}catch(_){}}
   }
   if(!Array.isArray(arr))arr=[arr];
-  return arr.map(x=>x&&x.name?{
-    name:String(x.name),
-    brand:String(x.brand||"不明"),
-    model:String(x.model||"不明"),
-    confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),
-    reason:String(x.reason||""),
-    box:{
-      x:Number(x.box?.x)||0,
-      y:Number(x.box?.y)||0,
-      w:Number(x.box?.w)||0,
-      h:Number(x.box?.h)||0
-    }
-  }:null).filter(Boolean).slice(0,10);
+  return arr.map(x=>x&&x.name?{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||""),box:{x:Number(x.box?.x)||0,y:Number(x.box?.y)||0,w:Number(x.box?.w)||0,h:Number(x.box?.h)||0}}:null).filter(Boolean).slice(0,3);
 }
 function dataUrlToBlob(s){const p=s.split(","),mime=(p[0].match(/data:([^;]+)/)||[])[1]||"image/jpeg",b=atob(p[1]),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:mime});}
 async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q);}
