@@ -67,7 +67,7 @@ async function askVision(dataUrl){
   catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
   try{
     const file=handle_file(dataUrlToBlob(dataUrl));
-    const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。商品の位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}で返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
+    const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。商品の位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}で返してください。商品全体を囲む大きめの矩形にしてください。分からない情報は不明。必ずboxを含めてください。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":800,"h":800}}';
     const job=app.submit("/qwen_vl_inference",[file,prompt]);
     for await(const msg of job){
       if(msg.type==="status" && msg.stage==="error") throw new Error(msg.message||"AI側でエラーが発生しました。");
@@ -85,7 +85,7 @@ async function askVision(dataUrl){
 function parseOne(text){
   const m=String(text).match(/\{[\s\S]*\}/);
   if(!m)return null;
-  try{const x=JSON.parse(m[0]);return x.name?{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||"")} : null}catch(e){return null;}
+  try{const x=JSON.parse(m[0]);return x.name?{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||""),box:{x:Number(x.box?.x)||0,y:Number(x.box?.y)||0,w:Number(x.box?.w)||0,h:Number(x.box?.h)||0}} : null}catch(e){return null;}
 }
 function dataUrlToBlob(s){const p=s.split(","),mime=(p[0].match(/data:([^;]+)/)||[])[1]||"image/jpeg",b=atob(p[1]),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:mime});}
 async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q);}
