@@ -67,19 +67,61 @@ async function askVision(dataUrl){
   let app;
   try{app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");}
   catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
-  try{
-    const file=handle_file(dataUrlToBlob(dataUrl));
-    const prompt='この写真はリユースショップの棚です。写真の中にある「別々の商品」を最大10個まで探してください。棚、値札、背景、同じ商品の重複は商品として数えません。各商品について、商品名、メーカー/ブランド、型番/シリーズ、理由、確度、商品の外接矩形boxを返してください。boxは写真全体を1000x1000とした相対座標で、左上がx=0,y=0です。x,yは商品の左上、w,hは商品の幅と高さです。必ず商品そのものをできるだけぴったり囲み、棚や隣の商品を大きく含めないでください。商品が分からない場合でも「不明な商品」として位置を返してください。JSON配列のみ返してください。形式: [{"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":200,"h":300}}]';
-    const job=app.submit("/qwen_vl_inference",[file,prompt]);
-    for await(const msg of job){
-      if(msg.type==="status" && msg.stage==="error") throw new Error(msg.message||"AI側でエラーが発生しました。");
-      if(msg.type==="data"){
-        if(!msg.data) throw new Error("AIから空の結果が返りました。");
-        return Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data);
+  const src=await imageInfo(dataUrl);
+  const tiles=[
+    {x:0,y:0,w:0.55,h:0.55},{x:0.45,y:0,w:0.55,h:0.55},
+    {x:0,y:0.45,w:0.55,h:0.55},{x:0.45,y:0.45,w:0.55,h:0.55}
+  ];
+  const all=[];
+  for(const t of tiles){
+    const tile=makeTile(src,t);
+    const file=handle_file(dataUrlToBlob(tile));
+    const prompt='この写真の中から、棚や背景ではなく「商品」だけを最大3個見つけてください。商品名は分かる範囲で簡潔にしてください。分からない商品も位置が分かれば「不明な商品」としてください。JSONや説明文は不要で、必ず次の形式の行だけを返してください。ITEM|商品名|メーカー|型番|確度(0-100)|x|y|w|h。x,y,w,hはこの写真全体を1000とした座標です。商品の本体をできるだけぴったり囲んでください。値札は商品に含めません。商品がなければNONEだけ返してください。';
+    try{
+      const job=app.submit("/qwen_vl_inference",[file,prompt]);
+      for await(const msg of job){
+        if(msg.type==="status"&&msg.stage==="error")throw new Error(msg.message||"AIエラー");
+        if(msg.type==="data"){
+          const out=Array.isArray(msg.data)?String(msg.data[0]||""):String(msg.data||"");
+          all.push(...parseLines(out,t));
+          break;
+        }
       }
-    }
-    throw new Error("AIから解析結果が返りませんでした。");
-  }catch(e){console.error("AI ERROR",e);throw new Error(e.message||String(e));}
+    }catch(e){console.warn("tile AI error",e);}
+  }
+  const unique=[];
+  for(const item of all){
+    const dup=unique.some(v=>Math.abs(v.box.x-item.box.x)<70&&Math.abs(v.box.y-item.box.y)<70);
+    if(!dup)unique.push(item);
+  }
+  return JSON.stringify(unique.slice(0,10));
+}
+async function imageInfo(dataUrl){
+  const img=new Image();img.src=dataUrl;
+  await new Promise((r,j)=>{img.onload=r;img.onerror=j});
+  return {w:img.naturalWidth,h:img.naturalHeight};
+}
+function makeTile(src,t){
+  const img=new Image();img.src=src;
+  const c=document.createElement("canvas");
+  const sw=Math.round(img.naturalWidth*t.w),sh=Math.round(img.naturalHeight*t.h);
+  c.width=Math.min(900,sw);c.height=Math.min(900,sh);
+  c.getContext("2d").drawImage(img,Math.round(img.naturalWidth*t.x),Math.round(img.naturalHeight*t.y),sw,sh,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.8);
+}
+function parseLines(text,t){
+  const out=[];
+  for(const line of String(text).split(/\\r?\\n/)){
+    const p=line.trim().split("|");
+    if(p[0]!=="ITEM"||p.length<9)continue;
+    const name=p[1]&&p[1].trim();
+    const x=Number(p[5]),y=Number(p[6]),w=Number(p[7]),h=Number(p[8]);
+    if(!name||![x,y,w,h].every(Number.isFinite)||w<5||h<5)continue;
+    out.push({name,brand:p[2]?.trim()||"不明",model:p[3]?.trim()||"不明",confidence:Math.max(0,Math.min(1,(Number(p[4])||0)/100)),reason:"棚写真からAIが検出",box:{
+      x:(t.x+x/1000*t.w)*1000,y:(t.y+y/1000*t.h)*1000,w:w*t.w,h:h*t.h
+    }});
+  }
+  return out;
 }
 function parseMany(text){
   let raw=String(text).trim().replace(/^\`\`\`(?:json)?/i,"").replace(/\`\`\`$/,"").trim();
