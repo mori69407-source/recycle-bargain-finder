@@ -38,23 +38,37 @@ $("analyze").addEventListener("click",async()=>{
 async function askVision(dataUrl){
   const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
   const Client=mod.Client,handle_file=mod.handle_file;
-  let app;
+  const prompt='画像に写っている商品を1個だけ説明してください。背景や棚は無視してください。商品名を最初に書いてください。分からない場合は「不明」としてください。日本語で短く答えてください。';
+  const blob=dataUrlToBlob(dataUrl);
   try{
-    app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct",{
-      status_callback:(status)=>console.log("AI SPACE STATUS",status)
-    });
-  }catch(e){throw new Error("AIサービスへ接続できません: "+(e.message||e));}
-  let api;
-  try{api=await app.view_api();}catch(e){throw new Error("AIのAPI情報を取得できません: "+(e.message||e));}
-  const endpoint=api&&api.named_endpoints&&api.named_endpoints["/qwen_vl_inference"];
-  if(!endpoint)throw new Error("AIサービスに /qwen_vl_inference がありません。現在のAPI: "+JSON.stringify(api&&api.named_endpoints||{}));
-  const file=handle_file(dataUrlToBlob(dataUrl));
-  const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。位置は画像全体を1000x1000とした相対座標です。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}';
+    const app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct");
+    const result=await app.predict("/qwen_vl_inference",[handle_file(blob),prompt]);
+    const text=extractResult(result);
+    if(text)return text;
+  }catch(e){console.warn("Qwen unavailable, fallback:",e);}
   try{
-    const result=await app.predict("/qwen_vl_inference",[file,prompt]);
-    if(!result||!result.data)throw new Error("AIから空の結果が返りました。");
-    return Array.isArray(result.data)?String(result.data[0]||""):String(result.data);
-  }catch(e){console.error("AI ERROR",e);throw new Error("AI解析処理で失敗しました: "+(e.message||e));}
+    const app=await Client.connect("https://vikhyatk-moondream1.hf.space/");
+    const result=await app.predict("/answer_question",[handle_file(blob),prompt]);
+    const text=extractResult(result);
+    if(text)return text;
+    throw new Error("代替AIからも空の結果でした。");
+  }catch(e){
+    throw new Error("AIから解析結果が返りませんでした。現在のAIサービスが利用できない状態です。");
+  }
+}
+function extractResult(result){
+  if(result==null)return "";
+  if(typeof result==="string")return result.trim();
+  if(Array.isArray(result)){
+    for(const x of result){
+      const t=extractResult(x);
+      if(t)return t;
+    }
+    return "";
+  }
+  if(result.data)return extractResult(result.data);
+  if(result.output)return extractResult(result.output);
+  return String(result).trim();
 }
 function parseOne(text){
   const raw=String(text).replace(/\`\`\`json/gi,"").replace(/\`\`\`/g,"").trim();
