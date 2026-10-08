@@ -51,7 +51,8 @@ $("analyze").addEventListener("click",async()=>{
     const text=await askVision(await resizeImage(photo,1100,0.72));
     const item=parseOne(text);
     if(!item)throw new Error("商品を特定できませんでした。");
-    $("resultList").innerHTML='<article class="item"><div class="number">1</div><div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p><p class="muted">'+escapeHtml(item.reason)+'</p></div></article>';
+    const crop=makeCrop(photo,item.box);
+    $("resultList").innerHTML='<article class="item"><div class="number">1</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="AIが認識した商品">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p><p class="muted">'+escapeHtml(item.reason)+'</p></div></article>'
   }catch(e){
     console.error(e);
     $("resultList").innerHTML='<div class="loading"><b>AI解析できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'<br><br>商品が大きく写った写真で、もう一度試してください。</div>';
@@ -66,7 +67,7 @@ async function askVision(dataUrl){
   catch(e){throw new Error("AIサービスに接続できません: "+(e.message||e));}
   try{
     const file=handle_file(dataUrlToBlob(dataUrl));
-    const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度を日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
+    const prompt='画像に写っている商品を1個だけ認識してください。背景や棚は無視してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。商品の位置は画像全体を1000x1000とした相対座標で、左上をx=0,y=0としてbox:{x,y,w,h}で返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.0,"reason":"理由"}';
     const job=app.submit("/qwen_vl_inference",[file,prompt]);
     for await(const msg of job){
       if(msg.type==="status" && msg.stage==="error") throw new Error(msg.message||"AI側でエラーが発生しました。");
@@ -92,3 +93,17 @@ $("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.displ
 $("back").addEventListener("click",()=>show("home"));
 function show(id){["home","results","detail"].forEach(x=>$(x).hidden=x!==id);window.scrollTo(0,0);}
 function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function makeCrop(src,box){
+  if(!src||!box||box.w<5||box.h<5)return "";
+  const img=$("preview");
+  if(!img.naturalWidth||!img.naturalHeight)return "";
+  const sx=Math.max(0,Math.round(box.x/1000*img.naturalWidth));
+  const sy=Math.max(0,Math.round(box.y/1000*img.naturalHeight));
+  const sw=Math.min(img.naturalWidth-sx,Math.round(box.w/1000*img.naturalWidth));
+  const sh=Math.min(img.naturalHeight-sy,Math.round(box.h/1000*img.naturalHeight));
+  if(sw<5||sh<5)return "";
+  const c=document.createElement("canvas"),scale=Math.min(1,500/Math.max(sw,sh));
+  c.width=Math.max(80,Math.round(sw*scale));c.height=Math.max(80,Math.round(sh*scale));
+  c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.85);
+}
