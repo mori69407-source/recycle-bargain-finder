@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-let stream=null,photo=null;
+let stream=null,photo=null,detectorPromise=null;
 
 async function startCamera(){
   try{
@@ -24,62 +24,72 @@ $("fileInput").addEventListener("change",e=>{
 function setPhoto(src){photo=src;$("preview").src=src;$("preview").style.display="block";$("video").style.display="none";$("cameraHint").style.display="none";$("analyze").disabled=false;}
 
 $("analyze").addEventListener("click",async()=>{
-  if(!photo)return;show("results");
-  $("resultList").innerHTML='<div class="loading"><b>AI解析中です…</b><br><br>商品1個だけを解析します。</div>';
+  if(!photo)return;
+  show("results");
+  $("resultList").innerHTML='<div class="loading"><b>写真を解析しています…</b><br><br>初回はAIモデルの読み込みに少し時間がかかります。画像は端末のブラウザー内で解析します。</div>';
+  $("analyze").disabled=true;
   try{
-    const text=await askVision(await resizeImage(photo,1100,0.72));
-    const item=parseOne(text);
-    if(!item)throw new Error("AIから返答はありましたが、商品情報を読み取れませんでした。");
-    const crop=makeCrop(photo,item.box);
-    $("resultList").innerHTML='<article class="item"><div class="number">1</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="AIが認識した商品">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(item.name)+'</h3>'+(item.brand!=="不明"?'<p><b>メーカー：</b>'+escapeHtml(item.brand)+'</p>':'')+(item.model!=="不明"?'<p><b>型番・シリーズ：</b>'+escapeHtml(item.model)+'</p>':'')+'<p><b>AI確度：</b>'+Math.round(item.confidence*100)+'%</p><p class="muted">'+escapeHtml(item.reason)+'</p></div></article>';
-  }catch(e){console.error(e);$("resultList").innerHTML='<div class="loading"><b>AI解析できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'</div>';}
+    const detector=await getDetector();
+    const img=await loadImage(photo);
+    const output=await detector(img,{threshold:0.22});
+    const items=selectItems(output).slice(0,3);
+    if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
+    $("resultList").innerHTML=items.map((item,i)=>{
+      const crop=cropImage(img,item.box);
+      const label=translateLabel(item.label);
+      const query=encodeURIComponent(label+" 中古 ヴィンテージ");
+      return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="検出した商品'+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p><b>検出の確度：</b>'+Math.round(item.score*100)+'%</p><p class="muted">これは物体の種類の推定です。ブランドや型番の特定ではありません。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a></div></article>';
+    }).join("");
+  }catch(e){
+    console.error(e);
+    $("resultList").innerHTML='<div class="loading"><b>検出できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'<br><br><button id="retry" type="button">もう一度試す</button></div>';
+    const retry=$("retry");if(retry)retry.addEventListener("click",()=>$("analyze").click());
+  }finally{$("analyze").disabled=false;}
 });
 
-async function askVision(dataUrl){
-  const mod=await import("https://cdn.jsdelivr.net/npm/@gradio/client/dist/index.min.js");
-  const Client=mod.Client;
-  const blob=dataUrlToBlob(dataUrl);
-  const prompt='画像に写っている商品を1個だけ認識してください。商品名、メーカー/ブランド、型番/シリーズ、理由、確度、画像内の商品の位置を日本語でJSONのみ返してください。分からない情報は不明。形式: {"name":"商品名","brand":"不明","model":"不明","confidence":0.8,"reason":"理由","box":{"x":100,"y":100,"w":300,"h":300}}';
-  try{
-    const app=await Client.connect("developer0hye/Qwen2.5-VL-7B-Instruct",{
-      status_callback:(status)=>console.log("Hugging Face:",status)
-    });
-    const result=await app.predict("/qwen_vl_inference",[blob,prompt]);
-    const text=extractResult(result);
-    if(!text)throw new Error("AIの返答が空でした。");
-    return text;
-  }catch(e){
-    console.error("AI ERROR",e);
-    throw new Error("AI解析に失敗しました: "+(e.message||String(e)));
+async function getDetector(){
+  if(!detectorPromise){
+    detectorPromise=(async()=>{
+      const {pipeline,env}=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
+      env.allowLocalModels=false;
+      return await pipeline("object-detection","Xenova/detr-resnet-50",{dtype:"q8"});
+    })().catch(e=>{detectorPromise=null;throw new Error("AIモデルを読み込めませんでした。通信環境を確認して、もう一度お試しください。詳細: "+(e.message||e));});
   }
+  return detectorPromise;
 }
-function extractResult(result){
-  if(result==null)return "";
-  if(typeof result==="string")return result.trim();
-  if(Array.isArray(result))return result.map(extractResult).find(Boolean)||"";
-  if(result.data!==undefined)return extractResult(result.data);
-  if(result.output!==undefined)return extractResult(result.output);
-  return "";
+function selectItems(output){
+  const seen=[];
+  for(const x of (output||[]).sort((a,b)=>b.score-a.score)){
+    if(!x.box||x.score<0.22)continue;
+    const b=x.box,w=b.xmax-b.xmin,h=b.ymax-b.ymin;
+    if(w<28||h<28)continue;
+    const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.55);
+    if(!duplicate)seen.push(x);
+    if(seen.length>=3)break;
+  }
+  return seen;
 }
-function parseOne(text){
-  const raw=String(text).replace(/\`\`\`json/gi,"").replace(/\`\`\`/g,"").trim();
-  const m=raw.match(/\{[\s\S]*\}/);if(!m)return null;
-  try{const x=JSON.parse(m[0]);if(!x||!x.name)return null;
-    return{name:String(x.name),brand:String(x.brand||"不明"),model:String(x.model||"不明"),confidence:Math.max(0,Math.min(1,Number(x.confidence)||0)),reason:String(x.reason||""),box:{x:Number(x.box?.x)||0,y:Number(x.box?.y)||0,w:Number(x.box?.w)||0,h:Number(x.box?.h)||0}};
-  }catch(e){return null;}
+function intersectionOverUnion(a,b){
+  const x1=Math.max(a.xmin,b.xmin),y1=Math.max(a.ymin,b.ymin),x2=Math.min(a.xmax,b.xmax),y2=Math.min(a.ymax,b.ymax);
+  const inter=Math.max(0,x2-x1)*Math.max(0,y2-y1);
+  const aa=Math.max(0,a.xmax-a.xmin)*Math.max(0,a.ymax-a.ymin),bb=Math.max(0,b.xmax-b.xmin)*Math.max(0,b.ymax-b.ymin);
+  return inter/(aa+bb-inter||1);
 }
-function dataUrlToBlob(s){const p=s.split(","),mime=(p[0].match(/data:([^;]+)/)||[])[1]||"image/jpeg",b=atob(p[1]),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return new Blob([a],{type:mime});}
-async function resizeImage(src,max,q){const img=new Image();img.src=src;await new Promise((r,j)=>{img.onload=r;img.onerror=j});const sc=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight)),c=document.createElement("canvas");c.width=Math.round(img.naturalWidth*sc);c.height=Math.round(img.naturalHeight*sc);c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",q);}
-$("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;show("home");});
+function loadImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src;});}
+function cropImage(img,b){
+  const x=Math.max(0,Math.floor(b.xmin)),y=Math.max(0,Math.floor(b.ymin));
+  const w=Math.min(img.naturalWidth-x,Math.ceil(b.xmax)-x),h=Math.min(img.naturalHeight-y,Math.ceil(b.ymax)-y);
+  if(w<2||h<2)return "";
+  const c=document.createElement("canvas"),scale=Math.min(1,480/Math.max(w,h));
+  c.width=Math.max(1,Math.round(w*scale));c.height=Math.max(1,Math.round(h*scale));
+  c.getContext("2d").drawImage(img,x,y,w,h,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.84);
+}
+function translateLabel(s){
+  const names={"teddy bear":"ぬいぐるみ（クマ）","cup":"カップ","bowl":"ボウル・器","vase":"花瓶","bottle":"ボトル","wine glass":"グラス","fork":"フォーク","knife":"ナイフ","spoon":"スプーン","dining table":"テーブル","book":"本","clock":"時計","vase":"花瓶","handbag":"バッグ","backpack":"リュック","remote":"リモコン","cell phone":"携帯電話","laptop":"ノートPC","scissors":"はさみ","toothbrush":"歯ブラシ","chair":"椅子","potted plant":"鉢植え","sports ball":"ボール","toy":"おもちゃ"};
+  return names[s]||s;
+}
+$("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;$("fileInput").value="";show("home");});
 $("back").addEventListener("click",()=>show("home"));
 function show(id){["home","results","detail"].forEach(x=>$(x).hidden=x!==id);window.scrollTo(0,0);}
-function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
-function makeCrop(src,box){
-  if(!src||!box||box.w<5||box.h<5)return "";
-  const img=$("preview");if(!img.naturalWidth||!img.naturalHeight)return "";
-  const sx=Math.max(0,Math.round(box.x/1000*img.naturalWidth)),sy=Math.max(0,Math.round(box.y/1000*img.naturalHeight));
-  const sw=Math.min(img.naturalWidth-sx,Math.round(box.w/1000*img.naturalWidth)),sh=Math.min(img.naturalHeight-sy,Math.round(box.h/1000*img.naturalHeight));
-  if(sw<5||sh<5)return "";
-  const c=document.createElement("canvas"),scale=Math.min(1,500/Math.max(sw,sh));c.width=Math.max(80,Math.round(sw*scale));c.height=Math.max(80,Math.round(sh*scale));
-  c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/jpeg",0.85);
-}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
