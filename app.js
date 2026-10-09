@@ -30,11 +30,12 @@ $("analyze").addEventListener("click",async()=>{
   $("analyze").disabled=true;
   try{
     const detector=await getDetector();
+    const original=await loadImage(photo);
     const img=await loadImage(await resizeForDetection(photo,960));
-    const items=await detectUpToThree(detector,img);
+    const items=(await detectUpToThree(detector,img)).map(item=>({...item,box:scaleBox(item.box,original.naturalWidth/img.naturalWidth,original.naturalHeight/img.naturalHeight)}));
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
     $("resultList").innerHTML=items.map((item,i)=>{
-      const crop=cropImage(img,item.box);
+      const crop=cropImage(original,item.box);
       const label=translateLabel(item.label);
       const query=encodeURIComponent(label+" 中古 ヴィンテージ");
       return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="検出した商品'+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p><b>検出の確度：</b>'+Math.round(item.score*100)+'%</p><p class="muted">これは物体の種類の推定です。ブランドや型番の特定ではありません。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a></div></article>';
@@ -51,24 +52,30 @@ async function getDetector(){
     detectorPromise=(async()=>{
       const {pipeline,env}=await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1");
       env.allowLocalModels=false;
-      return await pipeline("object-detection","Xenova/detr-resnet-50",{dtype:"q8"});
+      return await pipeline("zero-shot-object-detection","Xenova/owlvit-base-patch32",{dtype:"q8"});
     })().catch(e=>{detectorPromise=null;throw new Error("AIモデルを読み込めませんでした。通信環境を確認して、もう一度お試しください。詳細: "+(e.message||e));});
   }
   return detectorPromise;
 }
+const CANDIDATE_LABELS=[
+  "power adapter","AC adapter","phone charger","mobile phone","smartphone",
+  "video game console","video game controller","handheld game console","game cartridge",
+  "electronic device","electrical plug","cable","plush toy","stuffed animal",
+  "ceramic plate","plate","bowl","cup","mug","vase","figurine","toy",
+  "book","camera","remote control","headphones","speaker","clock","ornament","glass"
+];
 async function detectUpToThree(detector,img){
   const W=img.naturalWidth,H=img.naturalHeight;
   const canvas=document.createElement("canvas");canvas.width=W;canvas.height=H;
   canvas.getContext("2d").drawImage(img,0,0);
-  let found=selectItems(await detector(canvas,{threshold:0.12}));
+  let found=await detector(canvas,CANDIDATE_LABELS,{threshold:0.075,top_k:25});
+  found=selectItems(found);
   if(found.length>=3)return found.slice(0,3);
-  // Whole-scene detection can miss small objects on a crowded shelf.
-  // Recheck three overlapping vertical crops without asking the user to take another photo.
   const tileW=Math.ceil(W*0.58), starts=[0,Math.round((W-tileW)/2),Math.max(0,W-tileW)];
   for(const left of starts){
     const tile=document.createElement("canvas");tile.width=tileW;tile.height=H;
     tile.getContext("2d").drawImage(img,left,0,tileW,H,0,0,tileW,H);
-    const output=await detector(tile,{threshold:0.09});
+    const output=await detector(tile,CANDIDATE_LABELS,{threshold:0.065,top_k:25});
     for(const item of (output||[])){
       if(!item.box)continue;
       const b=item.box;
@@ -77,13 +84,14 @@ async function detectUpToThree(detector,img){
   }
   return selectItems(found).slice(0,3);
 }
+function scaleBox(b,sx,sy){return {xmin:b.xmin*sx,xmax:b.xmax*sx,ymin:b.ymin*sy,ymax:b.ymax*sy};}
 function selectItems(output){
   const seen=[];
   for(const x of (output||[]).sort((a,b)=>b.score-a.score)){
-    if(!x.box||x.score<0.09)continue;
+    if(!x.box||x.score<0.065)continue;
     const b=x.box,w=b.xmax-b.xmin,h=b.ymax-b.ymin;
-    if(w<20||h<20)continue;
-    const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.45);
+    if(w<24||h<24)continue;
+    const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.40);
     if(!duplicate)seen.push(x);
     if(seen.length>=3)break;
   }
@@ -107,7 +115,7 @@ function cropImage(img,b){
   return c.toDataURL("image/jpeg",0.84);
 }
 function translateLabel(s){
-  const names={"teddy bear":"ぬいぐるみ（クマ）","cup":"カップ","bowl":"ボウル・器","vase":"花瓶","bottle":"ボトル","wine glass":"グラス","fork":"フォーク","knife":"ナイフ","spoon":"スプーン","dining table":"テーブル","book":"本","clock":"時計","vase":"花瓶","handbag":"バッグ","backpack":"リュック","remote":"リモコン","cell phone":"携帯電話","laptop":"ノートPC","scissors":"はさみ","toothbrush":"歯ブラシ","chair":"椅子","potted plant":"鉢植え","sports ball":"ボール","toy":"おもちゃ"};
+  const names={"power adapter":"電源アダプター","AC adapter":"ACアダプター","phone charger":"充電器","mobile phone":"携帯電話","smartphone":"スマートフォン","video game console":"ゲーム機","video game controller":"ゲームコントローラー","handheld game console":"携帯ゲーム機","game cartridge":"ゲームソフト","electronic device":"電子機器","electrical plug":"電源プラグ","cable":"ケーブル","plush toy":"ぬいぐるみ","stuffed animal":"ぬいぐるみ","ceramic plate":"陶器の皿","plate":"皿","bowl":"器・ボウル","cup":"カップ","mug":"マグカップ","vase":"花瓶","figurine":"置物・フィギュア","toy":"おもちゃ","book":"本","camera":"カメラ","remote control":"リモコン","headphones":"ヘッドホン","speaker":"スピーカー","clock":"時計","ornament":"装飾品","glass":"グラス"};
   return names[s]||s;
 }
 $("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;$("fileInput").value="";show("home");});
