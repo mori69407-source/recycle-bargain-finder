@@ -26,32 +26,41 @@ function setPhoto(src){photo=src;$("preview").src=src;$("preview").style.display
 $("analyze").addEventListener("click",async()=>{
   if(!photo)return;
   show("results");
-  $("resultList").innerHTML='<div class="loading"><b>写真を解析しています…</b><br><br>初回はAIモデルの読み込みに少し時間がかかります。画像は端末のブラウザー内で解析します。</div>';
+  $("resultList").innerHTML='<div class="loading"><b>Web上のAIに写真を送って解析しています…</b><br><br>iPhone内の物体認識モデルではなく、サーバー側の画像対応AIを試します。画像は外部AIサービスに送信されます。</div>';
   $("analyze").disabled=true;
   try{
-    const detector=await getDetector();
-    const classifier=await getClassifier();
     const original=await loadImage(photo);
-    const img=await loadImage(await resizeForDetection(photo,960));
-    const items=(await detectUpToThree(detector,img)).map(item=>({...item,box:scaleBox(item.box,original.naturalWidth/img.naturalWidth,original.naturalHeight/img.naturalHeight)}));
-    if(items.length){
-      for(const item of items){
-        const cropUrl=cropImage(original,item.box,0.90);
-        if(!cropUrl)continue;
-        const ranked=await classifier(cropUrl,CLASSIFY_LABELS);
-        if(ranked&&ranked.length){item.finalLabel=ranked[0].label;item.score=Math.min(item.score,ranked[0].score);}
-      }
-    }
-    if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
+    const analysisImage=await resizeForDetection(photo,1280);
+    const prompt='あなたはリユース店の商品を調べるアシスタントです。写真に写っている別々の商品を最大3個まで見つけてください。商品名は見た目から具体的に日本語で答え、ブランドや型番は確証がなければ推測しないでください。各商品の位置を画像の左上を(0,0)、右下を(1000,1000)とする1000x1000の相対座標で、[左,上,右,下]として示してください。商品が重なっている場合は無理に分離せず、確実なものだけ答えてください。必ず次のJSONだけを返してください: {"items":[{"name":"商品名","box":[left,top,right,bottom],"reason":"見分けた特徴"}]}。商品がなければitemsを空配列にしてください。';
+    const response=await fetch("https://www.ahm7xmakki.com/api/imgchat",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({image:analysisImage,userPrompt:prompt})
+    });
+    if(!response.ok)throw new Error("Web上のAIサービスが応答しませんでした (HTTP "+response.status+")。時間をおいて再試行してください。");
+    const data=await response.json();
+    if(!data.success||!data.response)throw new Error(data.error||"Web上のAIから解析結果が返りませんでした。");
+    const raw=String(data.response).replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/,"");
+    const parsed=JSON.parse(raw);
+    const scaleX=original.naturalWidth/1000,scaleY=original.naturalHeight/1000;
+    const items=(Array.isArray(parsed.items)?parsed.items:[]).slice(0,3).map(item=>{
+      const b=Array.isArray(item.box)?item.box.map(Number):[];
+      if(b.length!==4||b.some(n=>!Number.isFinite(n)))return null;
+      const box={xmin:Math.max(0,Math.min(original.naturalWidth,b[0]*scaleX)),ymin:Math.max(0,Math.min(original.naturalHeight,b[1]*scaleY)),xmax:Math.max(0,Math.min(original.naturalWidth,b[2]*scaleX)),ymax:Math.max(0,Math.min(original.naturalHeight,b[3]*scaleY))};
+      if(box.xmax-box.xmin<12||box.ymax-box.ymin<12)return null;
+      return {label:String(item.name||"商品候補"),reason:String(item.reason||""),box};
+    }).filter(Boolean);
+    if(!items.length)throw new Error("商品を特定できませんでした。商品が大きく写る写真でもう一度お試しください。");
     $("resultList").innerHTML=items.map((item,i)=>{
-      const crop=cropImage(original,item.box,0.90);
-      const label=translateLabel(item.finalLabel||item.label);
+      const crop=cropImage(original,item.box,0.18);
+      const label=item.label;
       const query=encodeURIComponent(label+" 中古 ヴィンテージ");
-      return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="検出した商品'+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p><b>検出の確度：</b>'+Math.round(item.score*100)+'%</p><p class="muted">これは物体の種類の推定です。ブランドや型番の特定ではありません。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a></div></article>';
+      const lensQuery=encodeURIComponent(label);
+      return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="AIが指定した商品部分 '+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p>'+escapeHtml(item.reason)+'</p><p class="muted">Web上の画像AIによる推定です。商品名・切り抜き位置は誤ることがあります。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a>　<a class="source" target="_blank" rel="noopener" href="https://lens.google.com/">Googleレンズで確認 ↗</a></div></article>';
     }).join("");
   }catch(e){
     console.error(e);
-    $("resultList").innerHTML='<div class="loading"><b>検出できませんでした。</b><br><br>'+escapeHtml(e.message||String(e))+'<br><br><button id="retry" type="button">もう一度試す</button></div>';
+    const message=e instanceof SyntaxError?"Web上のAIは応答しましたが、商品リストを読み取れませんでした。もう一度試してください。":(e.message||String(e));
+    $("resultList").innerHTML='<div class="loading"><b>Web AI解析に失敗しました。</b><br><br>'+escapeHtml(message)+'<br><br><button id="retry" type="button">もう一度試す</button></div>';
     const retry=$("retry");if(retry)retry.addEventListener("click",()=>$("analyze").click());
   }finally{$("analyze").disabled=false;}
 });
