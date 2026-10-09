@@ -31,8 +31,7 @@ $("analyze").addEventListener("click",async()=>{
   try{
     const detector=await getDetector();
     const img=await loadImage(await resizeForDetection(photo,960));
-    const inputCanvas=document.createElement("canvas");inputCanvas.width=img.naturalWidth;inputCanvas.height=img.naturalHeight;inputCanvas.getContext("2d").drawImage(img,0,0);const output=await detector(inputCanvas,{threshold:0.22});
-    const items=selectItems(output).slice(0,3);
+    const items=await detectUpToThree(detector,img);
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
     $("resultList").innerHTML=items.map((item,i)=>{
       const crop=cropImage(img,item.box);
@@ -57,13 +56,34 @@ async function getDetector(){
   }
   return detectorPromise;
 }
+async function detectUpToThree(detector,img){
+  const W=img.naturalWidth,H=img.naturalHeight;
+  const canvas=document.createElement("canvas");canvas.width=W;canvas.height=H;
+  canvas.getContext("2d").drawImage(img,0,0);
+  let found=selectItems(await detector(canvas,{threshold:0.12}));
+  if(found.length>=3)return found.slice(0,3);
+  // Whole-scene detection can miss small objects on a crowded shelf.
+  // Recheck three overlapping vertical crops without asking the user to take another photo.
+  const tileW=Math.ceil(W*0.58), starts=[0,Math.round((W-tileW)/2),Math.max(0,W-tileW)];
+  for(const left of starts){
+    const tile=document.createElement("canvas");tile.width=tileW;tile.height=H;
+    tile.getContext("2d").drawImage(img,left,0,tileW,H,0,0,tileW,H);
+    const output=await detector(tile,{threshold:0.09});
+    for(const item of (output||[])){
+      if(!item.box)continue;
+      const b=item.box;
+      found.push({...item,box:{xmin:b.xmin+left,xmax:b.xmax+left,ymin:b.ymin,ymax:b.ymax}});
+    }
+  }
+  return selectItems(found).slice(0,3);
+}
 function selectItems(output){
   const seen=[];
   for(const x of (output||[]).sort((a,b)=>b.score-a.score)){
-    if(!x.box||x.score<0.22)continue;
+    if(!x.box||x.score<0.09)continue;
     const b=x.box,w=b.xmax-b.xmin,h=b.ymax-b.ymin;
-    if(w<28||h<28)continue;
-    const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.55);
+    if(w<20||h<20)continue;
+    const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.45);
     if(!duplicate)seen.push(x);
     if(seen.length>=3)break;
   }
