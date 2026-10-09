@@ -31,7 +31,7 @@ $("analyze").addEventListener("click",async()=>{
   try{
     const detector=await getDetector();
     const img=await loadImage(await resizeForDetection(photo,960));
-    const output=await detector(img,{threshold:0.22});
+    const inputCanvas=document.createElement("canvas");inputCanvas.width=img.naturalWidth;inputCanvas.height=img.naturalHeight;inputCanvas.getContext("2d").drawImage(img,0,0);const output=await detector(inputCanvas,{threshold:0.22});
     const items=selectItems(output).slice(0,3);
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
     $("resultList").innerHTML=items.map((item,i)=>{
