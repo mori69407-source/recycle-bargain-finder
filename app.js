@@ -36,7 +36,7 @@ $("analyze").addEventListener("click",async()=>{
     const items=(await detectUpToThree(detector,img)).map(item=>({...item,box:scaleBox(item.box,original.naturalWidth/img.naturalWidth,original.naturalHeight/img.naturalHeight)}));
     if(items.length){
       for(const item of items){
-        const cropUrl=cropImage(original,item.box,0.35);
+        const cropUrl=cropImage(original,item.box,0.90);
         if(!cropUrl)continue;
         const cropImg=await loadImage(cropUrl);
         const ranked=await classifier(cropImg,CLASSIFY_LABELS);
@@ -45,7 +45,7 @@ $("analyze").addEventListener("click",async()=>{
     }
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
     $("resultList").innerHTML=items.map((item,i)=>{
-      const crop=cropImage(original,item.box,0.60);
+      const crop=cropImage(original,item.box,0.90);
       const label=translateLabel(item.finalLabel||item.label);
       const query=encodeURIComponent(label+" 中古 ヴィンテージ");
       return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="検出した商品'+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p><b>検出の確度：</b>'+Math.round(item.score*100)+'%</p><p class="muted">これは物体の種類の推定です。ブランドや型番の特定ではありません。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a></div></article>';
@@ -86,10 +86,10 @@ const CANDIDATE_LABELS=[
   "shoe","bag","clothing","kitchen utensil","household object"
 ];
 const CLASSIFY_LABELS=[
-  "a television remote control","a laptop computer","a toothbrush","a wallet","a video game cartridge",
-  "a plush toy","a stuffed animal","a ceramic plate","a bowl","a cup","a mug","a glass","a vase",
-  "a book","a camera","a power adapter","a game controller","a handheld game console","a shoe","a bag",
-  "a figurine","a doll","a clock","a pair of headphones","a speaker","a cable","a household object"
+  "remote control for a television","laptop computer with a keyboard and screen","toothbrush with bristles and a long handle",
+  "wallet for carrying cards and money","video game disc or game software case","handheld game console","video game controller",
+  "mobile phone","plush stuffed animal","doll or toy figure","ceramic plate","bowl","cup or mug","drinking glass","vase",
+  "book or notebook","camera","power adapter or charger","shoe","bag","figurine","clock","headphones","speaker","cable","household item"
 ];
 async function detectUpToThree(detector,img){
   const W=img.naturalWidth,H=img.naturalHeight;
@@ -145,7 +145,7 @@ function cropImage(img,b,padRatio=0.42){
   return c.toDataURL("image/jpeg",0.84);
 }
 function translateLabel(s){
-  const names={"power adapter":"電源アダプター","AC adapter":"ACアダプター","phone charger":"充電器","mobile phone":"携帯電話","smartphone":"スマートフォン","video game console":"ゲーム機","video game controller":"ゲームコントローラー","handheld game console":"携帯ゲーム機","game cartridge":"ゲームソフト","electronic device":"電子機器","electrical plug":"電源プラグ","cable":"ケーブル","plush toy":"ぬいぐるみ","stuffed animal":"ぬいぐるみ","ceramic plate":"陶器の皿","plate":"皿","bowl":"器・ボウル","cup":"カップ","mug":"マグカップ","vase":"花瓶","figurine":"置物・フィギュア","toy":"おもちゃ","book":"本","camera":"カメラ","remote control":"リモコン","television remote control":"リモコン","laptop computer":"ノートパソコン","notebook computer":"ノートパソコン","computer":"パソコン","toothbrush":"歯ブラシ","electric toothbrush":"電動歯ブラシ","a television remote control":"リモコン","a laptop computer":"ノートパソコン","a toothbrush":"歯ブラシ","a wallet":"財布","a video game cartridge":"ゲームソフト","a plush toy":"ぬいぐるみ","a stuffed animal":"ぬいぐるみ","a ceramic plate":"陶器の皿","a bowl":"器・ボウル","a cup":"カップ","a mug":"マグカップ","a glass":"グラス","a vase":"花瓶","a book":"本","a camera":"カメラ","a power adapter":"電源アダプター","a game controller":"ゲームコントローラー","a handheld game console":"携帯ゲーム機","a shoe":"靴","a bag":"バッグ","a figurine":"フィギュア","a doll":"人形","a clock":"時計","a pair of headphones":"ヘッドホン","a speaker":"スピーカー","a cable":"ケーブル","a household object":"日用品","headphones":"ヘッドホン","speaker":"スピーカー","clock":"時計","ornament":"装飾品","glass":"グラス"};
+  const names={"power adapter":"電源アダプター","AC adapter":"ACアダプター","phone charger":"充電器","mobile phone":"携帯電話","smartphone":"スマートフォン","video game console":"ゲーム機","video game controller":"ゲームコントローラー","handheld game console":"携帯ゲーム機","game cartridge":"ゲームソフト","electronic device":"電子機器","electrical plug":"電源プラグ","cable":"ケーブル","plush toy":"ぬいぐるみ","stuffed animal":"ぬいぐるみ","ceramic plate":"陶器の皿","plate":"皿","bowl":"器・ボウル","cup":"カップ","mug":"マグカップ","vase":"花瓶","figurine":"置物・フィギュア","toy":"おもちゃ","book":"本","camera":"カメラ","remote control":"リモコン","television remote control":"リモコン","laptop computer":"ノートパソコン","notebook computer":"ノートパソコン","computer":"パソコン","toothbrush":"歯ブラシ","electric toothbrush":"電動歯ブラシ","remote control for a television":"リモコン","laptop computer with a keyboard and screen":"ノートパソコン","toothbrush with bristles and a long handle":"歯ブラシ","wallet for carrying cards and money":"財布","video game disc or game software case":"ゲームソフト","handheld game console":"携帯ゲーム機","video game controller":"ゲームコントローラー","mobile phone":"携帯電話","a plush toy":"ぬいぐるみ","a stuffed animal":"ぬいぐるみ","a ceramic plate":"陶器の皿","a bowl":"器・ボウル","a cup":"カップ","a mug":"マグカップ","a glass":"グラス","a vase":"花瓶","a book":"本","a camera":"カメラ","a power adapter":"電源アダプター","a game controller":"ゲームコントローラー","a handheld game console":"携帯ゲーム機","a shoe":"靴","a bag":"バッグ","a figurine":"フィギュア","a doll":"人形","a clock":"時計","a pair of headphones":"ヘッドホン","a speaker":"スピーカー","a cable":"ケーブル","a household object":"日用品","headphones":"ヘッドホン","speaker":"スピーカー","clock":"時計","ornament":"装飾品","glass":"グラス"};
   return names[s]||s;
 }
 $("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;$("fileInput").value="";show("home");});
