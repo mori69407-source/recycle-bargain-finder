@@ -35,7 +35,7 @@ $("analyze").addEventListener("click",async()=>{
     const items=(await detectUpToThree(detector,img)).map(item=>({...item,box:scaleBox(item.box,original.naturalWidth/img.naturalWidth,original.naturalHeight/img.naturalHeight)}));
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
     $("resultList").innerHTML=items.map((item,i)=>{
-      const crop=cropImage(original,item.box);
+      const crop=cropImage(original,item.box,0.42);
       const label=translateLabel(item.label);
       const query=encodeURIComponent(label+" 中古 ヴィンテージ");
       return '<article class="item"><div class="number">'+(i+1)+'</div>'+(crop?'<img class="thumb crop" src="'+crop+'" alt="検出した商品'+(i+1)+'">':'<div class="thumb"></div>')+'<div><h3>'+escapeHtml(label)+'</h3><p><b>検出の確度：</b>'+Math.round(item.score*100)+'%</p><p class="muted">これは物体の種類の推定です。ブランドや型番の特定ではありません。</p><a class="source" target="_blank" rel="noopener" href="https://www.google.com/search?tbm=isch&q='+query+'">似た商品を画像検索 ↗</a></div></article>';
@@ -58,24 +58,25 @@ async function getDetector(){
   return detectorPromise;
 }
 const CANDIDATE_LABELS=[
-  "power adapter","AC adapter","phone charger","mobile phone","smartphone",
-  "video game console","video game controller","handheld game console","game cartridge",
-  "electronic device","electrical plug","cable","plush toy","stuffed animal",
-  "ceramic plate","plate","bowl","cup","mug","vase","figurine","toy",
-  "book","camera","remote control","headphones","speaker","clock","ornament","glass"
+  "plush toy","stuffed animal","toy figure","figurine","doll",
+  "ceramic plate","plate","bowl","cup","mug","glass","vase",
+  "book","small box","ornament","decorative object","clock",
+  "camera","remote control","headphones","speaker",
+  "power adapter","video game controller","handheld game console","game cartridge",
+  "shoe","bag","wallet","clothing","kitchen utensil","household object"
 ];
 async function detectUpToThree(detector,img){
   const W=img.naturalWidth,H=img.naturalHeight;
   const canvas=document.createElement("canvas");canvas.width=W;canvas.height=H;
   canvas.getContext("2d").drawImage(img,0,0);
-  let found=await detector(canvas,CANDIDATE_LABELS,{threshold:0.075,top_k:25});
+  let found=await detector(canvas,CANDIDATE_LABELS,{threshold:0.12,top_k:20});
   found=selectItems(found);
   if(found.length>=3)return found.slice(0,3);
   const tileW=Math.ceil(W*0.58), starts=[0,Math.round((W-tileW)/2),Math.max(0,W-tileW)];
   for(const left of starts){
     const tile=document.createElement("canvas");tile.width=tileW;tile.height=H;
     tile.getContext("2d").drawImage(img,left,0,tileW,H,0,0,tileW,H);
-    const output=await detector(tile,CANDIDATE_LABELS,{threshold:0.065,top_k:25});
+    const output=await detector(tile,CANDIDATE_LABELS,{threshold:0.10,top_k:20});
     for(const item of (output||[])){
       if(!item.box)continue;
       const b=item.box;
@@ -88,7 +89,7 @@ function scaleBox(b,sx,sy){return {xmin:b.xmin*sx,xmax:b.xmax*sx,ymin:b.ymin*sy,
 function selectItems(output){
   const seen=[];
   for(const x of (output||[]).sort((a,b)=>b.score-a.score)){
-    if(!x.box||x.score<0.065)continue;
+    if(!x.box||x.score<0.10)continue;
     const b=x.box,w=b.xmax-b.xmin,h=b.ymax-b.ymin;
     if(w<24||h<24)continue;
     const duplicate=seen.some(y=>intersectionOverUnion(y.box,b)>0.40);
@@ -105,9 +106,12 @@ function intersectionOverUnion(a,b){
 }
 async function resizeForDetection(src,max){const original=await loadImage(src);const scale=Math.min(1,max/Math.max(original.naturalWidth,original.naturalHeight));if(scale===1)return src;const c=document.createElement('canvas');c.width=Math.round(original.naturalWidth*scale);c.height=Math.round(original.naturalHeight*scale);c.getContext('2d').drawImage(original,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.82);}
 function loadImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src;});}
-function cropImage(img,b){
-  const x=Math.max(0,Math.floor(b.xmin)),y=Math.max(0,Math.floor(b.ymin));
-  const w=Math.min(img.naturalWidth-x,Math.ceil(b.xmax)-x),h=Math.min(img.naturalHeight-y,Math.ceil(b.ymax)-y);
+function cropImage(img,b,padRatio=0.42){
+  const bw=Math.max(1,b.xmax-b.xmin),bh=Math.max(1,b.ymax-b.ymin);
+  const x=Math.max(0,Math.floor(b.xmin-bw*padRatio)),y=Math.max(0,Math.floor(b.ymin-bh*padRatio));
+  const right=Math.min(img.naturalWidth,Math.ceil(b.xmax+bw*padRatio));
+  const bottom=Math.min(img.naturalHeight,Math.ceil(b.ymax+bh*padRatio));
+  const w=right-x,h=bottom-y;
   if(w<2||h<2)return "";
   const c=document.createElement("canvas"),scale=Math.min(1,480/Math.max(w,h));
   c.width=Math.max(1,Math.round(w*scale));c.height=Math.max(1,Math.round(h*scale));
