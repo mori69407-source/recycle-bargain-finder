@@ -30,7 +30,7 @@ $("analyze").addEventListener("click",async()=>{
   $("analyze").disabled=true;
   try{
     const detector=await getDetector();
-    const img=await loadImage(photo);
+    const img=await loadImage(await resizeForDetection(photo,960));
     const output=await detector(img,{threshold:0.22});
     const items=selectItems(output).slice(0,3);
     if(!items.length)throw new Error("商品を検出できませんでした。商品が大きく写るように撮り直すか、明るい写真を選んでください。");
@@ -75,6 +75,7 @@ function intersectionOverUnion(a,b){
   const aa=Math.max(0,a.xmax-a.xmin)*Math.max(0,a.ymax-a.ymin),bb=Math.max(0,b.xmax-b.xmin)*Math.max(0,b.ymax-b.ymin);
   return inter/(aa+bb-inter||1);
 }
+async function resizeForDetection(src,max){const original=await loadImage(src);const scale=Math.min(1,max/Math.max(original.naturalWidth,original.naturalHeight));if(scale===1)return src;const c=document.createElement('canvas');c.width=Math.round(original.naturalWidth*scale);c.height=Math.round(original.naturalHeight*scale);c.getContext('2d').drawImage(original,0,0,c.width,c.height);return c.toDataURL('image/jpeg',0.82);}
 function loadImage(src){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=src;});}
 function cropImage(img,b){
   const x=Math.max(0,Math.floor(b.xmin)),y=Math.max(0,Math.floor(b.ymin));
