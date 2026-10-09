@@ -38,8 +38,7 @@ $("analyze").addEventListener("click",async()=>{
       for(const item of items){
         const cropUrl=cropImage(original,item.box,0.90);
         if(!cropUrl)continue;
-        const cropImg=await loadImage(cropUrl);
-        const ranked=await classifier(cropImg,CLASSIFY_LABELS);
+        const ranked=await classifier(cropUrl,CLASSIFY_LABELS);
         if(ranked&&ranked.length){item.finalLabel=ranked[0].label;item.score=Math.min(item.score,ranked[0].score);}
       }
     }
