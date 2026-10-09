@@ -61,9 +61,10 @@ const CANDIDATE_LABELS=[
   "plush toy","stuffed animal","toy figure","figurine","doll",
   "ceramic plate","plate","bowl","cup","mug","glass","vase",
   "book","small box","ornament","decorative object","clock",
-  "camera","remote control","headphones","speaker",
+  "camera","remote control","television remote control","headphones","speaker",
+  "laptop computer","notebook computer","computer","toothbrush","electric toothbrush",
   "power adapter","video game controller","handheld game console","game cartridge",
-  "shoe","bag","wallet","clothing","kitchen utensil","household object"
+  "shoe","bag","clothing","kitchen utensil","household object"
 ];
 async function detectUpToThree(detector,img){
   const W=img.naturalWidth,H=img.naturalHeight;
@@ -119,7 +120,7 @@ function cropImage(img,b,padRatio=0.42){
   return c.toDataURL("image/jpeg",0.84);
 }
 function translateLabel(s){
-  const names={"power adapter":"電源アダプター","AC adapter":"ACアダプター","phone charger":"充電器","mobile phone":"携帯電話","smartphone":"スマートフォン","video game console":"ゲーム機","video game controller":"ゲームコントローラー","handheld game console":"携帯ゲーム機","game cartridge":"ゲームソフト","electronic device":"電子機器","electrical plug":"電源プラグ","cable":"ケーブル","plush toy":"ぬいぐるみ","stuffed animal":"ぬいぐるみ","ceramic plate":"陶器の皿","plate":"皿","bowl":"器・ボウル","cup":"カップ","mug":"マグカップ","vase":"花瓶","figurine":"置物・フィギュア","toy":"おもちゃ","book":"本","camera":"カメラ","remote control":"リモコン","headphones":"ヘッドホン","speaker":"スピーカー","clock":"時計","ornament":"装飾品","glass":"グラス"};
+  const names={"power adapter":"電源アダプター","AC adapter":"ACアダプター","phone charger":"充電器","mobile phone":"携帯電話","smartphone":"スマートフォン","video game console":"ゲーム機","video game controller":"ゲームコントローラー","handheld game console":"携帯ゲーム機","game cartridge":"ゲームソフト","electronic device":"電子機器","electrical plug":"電源プラグ","cable":"ケーブル","plush toy":"ぬいぐるみ","stuffed animal":"ぬいぐるみ","ceramic plate":"陶器の皿","plate":"皿","bowl":"器・ボウル","cup":"カップ","mug":"マグカップ","vase":"花瓶","figurine":"置物・フィギュア","toy":"おもちゃ","book":"本","camera":"カメラ","remote control":"リモコン","television remote control":"リモコン","laptop computer":"ノートパソコン","notebook computer":"ノートパソコン","computer":"パソコン","toothbrush":"歯ブラシ","electric toothbrush":"電動歯ブラシ","headphones":"ヘッドホン","speaker":"スピーカー","clock":"時計","ornament":"装飾品","glass":"グラス"};
   return names[s]||s;
 }
 $("newSearch").addEventListener("click",()=>{photo=null;$("preview").style.display="none";$("video").style.display="block";$("analyze").disabled=true;$("fileInput").value="";show("home");});
