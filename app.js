@@ -32,7 +32,7 @@ $("analyze").addEventListener("click",async()=>{
     const original=await loadImage(photo);
     const analysisImage=await resizeForDetection(photo,1280);
     const prompt='あなたはリユース店の商品を調べるアシスタントです。写真に写っている別々の商品を最大3個まで見つけてください。商品名は見た目から具体的に日本語で答え、ブランドや型番は確証がなければ推測しないでください。各商品の位置を画像の左上を(0,0)、右下を(1000,1000)とする1000x1000の相対座標で、[左,上,右,下]として示してください。商品が重なっている場合は無理に分離せず、確実なものだけ答えてください。必ず次のJSONだけを返してください: {"items":[{"name":"商品名","box":[left,top,right,bottom],"reason":"見分けた特徴"}]}。商品がなければitemsを空配列にしてください。';
-    const response=await fetch("https://www.ahm7xmakki.com/api/imgchat",{
+    const response=await fetch("https://ahm7xmakki.com/api/imgchat",{
       method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({image:analysisImage,userPrompt:prompt})
     });
